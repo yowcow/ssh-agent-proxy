@@ -1,0 +1,42 @@
+#!/bin/sh
+
+UID=${UID:-1000}
+SSH_AUTH_PROXY_SOCK=${SSH_AUTH_PROXY_SOCK:-$SSH_AUTH_SOCK.uid-$UID}
+
+args=$(getopt u:s:h $*) || exit 1
+set -- $args
+
+for opt in "$@"; do
+    case $opt in
+        -u) UID=$2
+            shift 2
+            ;;
+        -s) SSH_AUTH_PROXY_SOCK=$2
+            shift 2
+            ;;
+        -h) echo "Usage: $0 [-u <UID of the proxy owner>] [-s /path/to/socket/file] -- <command to run>"
+            exit 0
+            ;;
+        --) shift
+            break
+            ;;
+    esac
+done
+
+socat_pid=0
+
+if [ ! -f $SSH_AUTH_PROXY_SOCK ]; then
+    sudo socat unix-listen:${SSH_AUTH_PROXY_SOCK},user=${UID},fork "unix:${SSH_AUTH_SOCK}" &
+    socat_pid=$!
+fi
+
+cleanup() {
+    if [ "$socat_pid" -ne "0" ]; then
+        sleep 1 # make sure no process is left behind
+        sudo kill -INT $socat_pid
+    fi
+}
+trap cleanup EXIT
+
+SSH_AUTH_SOCK=$SSH_AUTH_PROXY_SOCK \
+    eval "$@"
